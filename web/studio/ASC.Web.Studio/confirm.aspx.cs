@@ -218,29 +218,21 @@ namespace ASC.Web.Studio
                     break;
 
                 case ConfirmType.EmailChange:
-                    checkKeyResult = EmailValidationKeyProvider.ValidateEmailKey(_email + _type + SecurityContext.CurrentAccount.ID, key, validInterval);
+                    var emailChangeEvent = AuditEventsRepository
+                        .GetByFilter(Guid.Empty, ProductType.None, ModuleType.None, ActionType.None, MessageAction.UserSentEmailChangeInstructions, EntryType.User, MessageTarget.Create(SecurityContext.CurrentAccount.ID).ToString(), DateTime.MinValue, DateTime.MaxValue, 0, 1)
+                        .FirstOrDefault();
+
+                    var postfix = emailChangeEvent == null
+                        ? SecurityContext.CurrentAccount.ID.ToString()
+                        : TenantUtil.DateTimeToUtc(emailChangeEvent.Date).ToString("s");
+
+                    checkKeyResult = EmailValidationKeyProvider.ValidateEmailKey(_email + _type + postfix, key, validInterval);
                     break;
 
                 case ConfirmType.PasswordChange:
                     var userInfo = CoreContext.UserManager.GetUserByEmail(_email);
-                    var auditEvent = AuditEventsRepository.GetByFilter(action: MessageAction.UserSentPasswordChangeInstructions, entry: EntryType.User, target: MessageTarget.Create(userInfo.ID).ToString(), limit: 1).FirstOrDefault();
-                    var passwordStamp = CoreContext.Authentication.GetUserPasswordStamp(userInfo.ID);
-
-                    string hash;
-
-                    if (auditEvent != null)
-                    {
-                        var auditEventDate = TenantUtil.DateTimeToUtc(auditEvent.Date);
-
-                        hash = (auditEventDate.CompareTo(passwordStamp) > 0 ? auditEventDate : passwordStamp).ToString("s");
-                    }
-                    else
-                    {
-                        hash = passwordStamp.ToString("s");
-                    }
-
+                    var hash = CoreContext.Authentication.GetUserPasswordStamp(userInfo.ID).ToString("s");
                     checkKeyResult = EmailValidationKeyProvider.ValidateEmailKey(_email + _type + hash, key, validInterval);
-
                     break;
 
                 case ConfirmType.ShareLinkPassword:

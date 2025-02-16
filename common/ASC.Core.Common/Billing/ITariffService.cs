@@ -24,6 +24,8 @@ namespace ASC.Core.Billing
     {
         Tariff GetTariff(int tenantId, bool withRequestToPaymentSystem = true);
 
+        IEnumerable<Tariff> GetAdditionalTariffs(int tenantId);
+
         void SetTariff(int tenantId, Tariff tariff);
 
         void DeleteDefaultBillingInfo();
@@ -41,5 +43,7 @@ namespace ASC.Core.Billing
         string GetButton(int tariffId, string partnerId);
 
         void SaveButton(int tariffId, string partnerId, string buttonUrl);
+
+        void ChangeDocspaceNonProfitTariff(int tenantId, bool isActive);
     }
 }

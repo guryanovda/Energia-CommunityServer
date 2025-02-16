@@ -136,11 +136,17 @@ namespace ASC.Files.AutoCleanUp
 
                     var itemList = new ItemList<string>();
                     var trashId = folderDao.GetFolderIDTrash(false, tenantUser.UserId);
-                    
+
+                    if (Convert.ToInt32(trashId) <= 0)
+                    {
+                        _logger.InfoFormat("No trash folder for tenant {0}, user {1}", tenantUser.TenantId, SecurityContext.CurrentAccount.ID);
+                        return;
+                    }
+
                     itemList.AddRange(folderDao.GetFolders(trashId)
                         .Where(x => FileDateTime.GetModifiedOnWithAutoCleanUp(x.ModifiedOn, tenantUser.Setting, true) < now)
                         .Select(f => "folder_" + f.ID));
-                    itemList.AddRange(fileDao.GetFiles(trashId, null, default(FilterType), false, Guid.Empty, string.Empty, false)
+                    itemList.AddRange(fileDao.GetFiles(trashId, null, default(FilterType), false, Guid.Empty, string.Empty, false, null)
                         .Where(x => FileDateTime.GetModifiedOnWithAutoCleanUp(x.ModifiedOn, tenantUser.Setting, true) < now)
                         .Select(y => "file_" + y.ID));
 

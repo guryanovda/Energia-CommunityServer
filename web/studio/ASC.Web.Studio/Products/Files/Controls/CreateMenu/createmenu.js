@@ -26,6 +26,9 @@ window.ASC.Files.CreateMenu = (function () {
         jq.dropdownToggle({
             switcherSelector: "#menuCreateNewButton:not(.disable)",
             dropdownID: "newDocumentPanel",
+            beforeShowFunction: function () {
+                jq("#createMasterFormPointer").parent().toggleClass("display-none", ASC.Files.Folders.folderContainer == "privacy");
+            },
             inPopup: true,
             addTop: 4
         });
@@ -92,7 +95,7 @@ window.ASC.Files.CreateMenu = (function () {
     };
 
     var disableMenu = function (enable) {
-        var listButtons = jq("#menuUploadActionsButton, #buttonUpload, #buttonFolderUpload, #createDocument, #createSpreadsheet, #createPresentation, #createMasterFormPointer, #createMasterForm, #createMasterFormFromFile, #createNewFolder" +
+        var listButtons = jq("#menuUploadActionsButton, #buttonUpload, #buttonFolderUpload, #createDocument, #createSpreadsheet, #createPresentation, #createMasterFormPointer, #createMasterForm, #createMasterFormFromFile, #createNewFolder, #createMesterFormFromLocalFile" +
             (!ASC.Files.Tree.folderIdCurrentRoot
                 ? ", .page-menu .menu-actions .menu-main-button"
                 : ""));

@@ -731,6 +731,9 @@ namespace ASC.Api.Employee
             if (CoreContext.UserManager.IsSystemUser(user.ID))
                 throw new SecurityException();
 
+            if (user.Status != EmployeeStatus.Active)
+                throw new Exception("The user is suspended");
+
             var self = SecurityContext.CurrentAccount.ID.Equals(user.ID);
             var resetDate = new DateTime(1900, 01, 01);
 
@@ -1130,6 +1133,8 @@ namespace ASC.Api.Employee
 
                     CoreContext.UserManager.SaveUserInfo(user, syncCardDav: true);
                     MessageService.Send(Request, MessageAction.UserUpdatedEmail, messageTarget, messageDescription);
+
+                    CookiesManager.ResetUserCookie(user.ID);
 
                     StudioNotifyService.Instance.SendEmailActivationInstructions(user, email);
                     MessageService.Send(HttpContext.Current.Request, MessageAction.UserSentActivationInstructions, messageTarget, messageDescription);

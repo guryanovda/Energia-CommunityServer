@@ -63,10 +63,11 @@ namespace ASC.Data.Storage.GoogleCloud
             _modulename = string.Empty;
             _cache = false;
             _dataList = null;
+            _attachment = false;
 
             _domainsExpires = new Dictionary<string, TimeSpan> { { string.Empty, TimeSpan.Zero } };
             _domainsAcl = new Dictionary<string, PredefinedObjectAcl>();
-            _moduleAcl = PredefinedObjectAcl.PublicRead;
+            _moduleAcl = PredefinedObjectAcl.BucketOwnerFullControl;
 
         }
 
@@ -77,18 +78,27 @@ namespace ASC.Data.Storage.GoogleCloud
             _modulename = moduleConfig.Name;
             _cache = moduleConfig.Cache;
             _dataList = new DataList(moduleConfig);
+            _attachment = moduleConfig.Attachment;
 
-            _domainsExpires =
-                moduleConfig.Domains.Cast<DomainConfigurationElement>().Where(x => x.Expires != TimeSpan.Zero).
-                    ToDictionary(x => x.Name,
-                                 y => y.Expires);
-
-            _domainsExpires.Add(string.Empty, moduleConfig.Expires);
-
-            _domainsAcl = moduleConfig.Domains.Cast<DomainConfigurationElement>().ToDictionary(x => x.Name,
-                                                                                   y => GetGoogleCloudAcl(y.Acl));
             _moduleAcl = GetGoogleCloudAcl(moduleConfig.Acl);
+            _domainsAcl = new Dictionary<string, PredefinedObjectAcl>();
+            _domainsExpires.Add(string.Empty, moduleConfig.Expires);
+            _domainsValidators.Add(string.Empty, CreateValidator(moduleConfig.ValidatorType, moduleConfig.ValidatorParams));
 
+            foreach (DomainConfigurationElement domain in moduleConfig.Domains)
+            {
+                _domainsAcl.Add(domain.Name, GetGoogleCloudAcl(domain.Acl));
+
+                if (domain.Expires != TimeSpan.Zero)
+                {
+                    _domainsExpires.Add(domain.Name, domain.Expires);
+                }
+
+                if (!string.IsNullOrEmpty(domain.ValidatorType))
+                {
+                    _domainsValidators.Add(domain.Name, CreateValidator(domain.ValidatorType, domain.ValidatorParams));
+                }
+            }
         }
 
         public override IDataStore Configure(IDictionary<string, string> props)
@@ -346,9 +356,9 @@ namespace ASC.Data.Storage.GoogleCloud
             switch (acl)
             {
                 case ACL.Read:
-                    return PredefinedObjectAcl.PublicRead;
+                    return PredefinedObjectAcl.BucketOwnerFullControl;
                 default:
-                    return PredefinedObjectAcl.PublicRead;
+                    return PredefinedObjectAcl.BucketOwnerFullControl;
             }
         }
 
@@ -477,8 +487,11 @@ namespace ASC.Data.Storage.GoogleCloud
 
             }
         }
+        public override Uri Move(string srcdomain, string srcpath, string newdomain, string newpath, bool quotaCheckFileSize = true) {
+            return Move(srcdomain, srcpath, newdomain, newpath, Guid.Empty, quotaCheckFileSize);
+        }
 
-        public override Uri Move(string srcdomain, string srcpath, string newdomain, string newpath, bool quotaCheckFileSize = true)
+        public override Uri Move(string srcdomain, string srcpath, string newdomain, string newpath, Guid ownerId, bool quotaCheckFileSize = true)
         {
             var storage = GetStorage();
 
@@ -494,7 +507,7 @@ namespace ASC.Data.Storage.GoogleCloud
             Delete(srcdomain, srcpath);
 
             QuotaUsedDelete(srcdomain, size);
-            QuotaUsedAdd(newdomain, size, quotaCheckFileSize);
+            QuotaUsedAdd(newdomain, size, ownerId, quotaCheckFileSize);
 
             return GetUri(newdomain, newpath);
 
@@ -525,10 +538,10 @@ namespace ASC.Data.Storage.GoogleCloud
             return items.Where(x => x.Name.IndexOf('/', MakePath(domain, path + "/").Length) == -1);
         }
 
-        public override string[] ListFilesRelative(string domain, string path, string pattern, bool recursive)
+        public override IEnumerable<string> ListFilesRelative(string domain, string path, string pattern, bool recursive)
         {
             return GetObjects(domain, path, recursive).Where(x => Wildcard.IsMatch(pattern, Path.GetFileName(x.Name)))
-                   .Select(x => x.Name.Substring(MakePath(domain, path + "/").Length).TrimStart('/')).ToArray();
+                   .Select(x => x.Name.Substring(MakePath(domain, path + "/").Length).TrimStart('/'));
         }
 
         public override bool IsFile(string domain, string path)

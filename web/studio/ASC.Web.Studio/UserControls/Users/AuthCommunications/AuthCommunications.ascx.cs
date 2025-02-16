@@ -23,6 +23,7 @@ using System.Web.UI;
 
 using AjaxPro;
 
+using ASC.Common.Utils;
 using ASC.Core;
 using ASC.Core.Tenants;
 using ASC.Core.Users;
@@ -95,6 +96,8 @@ namespace ASC.Web.Studio.UserControls
                 if (!email.TestEmailRegex())
                     throw new Exception(Resource.ErrorNotCorrectEmail);
 
+                message = HtmlUtil.ToPlainText(message);
+
                 if (string.IsNullOrEmpty(message))
                     throw new Exception(Resource.ErrorEmptyMessage);
 
@@ -126,7 +129,7 @@ namespace ASC.Web.Studio.UserControls
                 if (!EnabledJoin)
                     throw new MethodAccessException("Method not available");
 
-                if (!email.TestEmailRegex())
+                if (!email.TestEmailRegex() || email.TestEmailPunyCode())
                     throw new Exception(Resource.ErrorNotCorrectEmail);
 
                 var user = CoreContext.UserManager.GetUserByEmail(email);

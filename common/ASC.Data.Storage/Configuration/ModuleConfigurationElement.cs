@@ -129,5 +129,26 @@ namespace ASC.Data.Storage.Configuration
             get { return (bool)this[Schema.CACHE]; }
             set { this[Schema.CACHE] = value; }
         }
+
+        [ConfigurationProperty(Schema.ATTACHMENT)]
+        public bool Attachment
+        {
+            get { return (bool)this[Schema.ATTACHMENT]; }
+            set { this[Schema.ATTACHMENT] = value; }
+        }
+
+        [ConfigurationProperty(Schema.VALIDATORTYPE)]
+        public string ValidatorType
+        {
+            get { return (string)this[Schema.VALIDATORTYPE]; }
+            set { this[Schema.VALIDATORTYPE] = value; }
+        }
+
+        [ConfigurationProperty(Schema.VALIDATORPARAMS)]
+        public string ValidatorParams
+        {
+            get { return (string)this[Schema.VALIDATORPARAMS]; }
+            set { this[Schema.VALIDATORPARAMS] = value; }
+        }
     }
 }

@@ -57,7 +57,7 @@ window.ASC.Files.EmptyScreen = (function () {
         jq("#filesMainContent, #switchViewFolder, #mainContentHeader, #pageNavigatorHolder, #filesBreadCrumbs").hide();
         jq("#emptyContainer > div").hide();
 
-        if (!ASC.Files.Filter || !ASC.Files.Filter.getFilterSettings().isSet) {
+        if ((!ASC.Files.Filter || !ASC.Files.Filter.getFilterSettings().isSet) && (!ASC.Files.FileSelector || !ASC.Files.FileSelector.filesFilterText)) {
             jq(".files-filter").hide();
 
             jq("#emptyContainer .empty-folder-create").toggle(ASC.Files.Folders.folderContainer == "privacy" ? !!ASC.Desktop : ASC.Files.UI.accessEdit());
@@ -66,8 +66,10 @@ window.ASC.Files.EmptyScreen = (function () {
                 jq("#emptyContainer_subfolder").show();
 
                 ASC.Files.UI.checkButtonBack(".empty-folder-toparent");
+                ASC.Files.UI.checkButtonMasterForm(".empty-folder-create-masterform", "#emptyContainer_subfolder");
             } else {
                 jq("#emptyContainer_" + ASC.Files.Folders.folderContainer).show();
+                ASC.Files.UI.checkButtonMasterForm(".empty-folder-create-masterform", "#emptyContainer_" + ASC.Files.Folders.folderContainer);
             }
         } else {
             jq("#emptyContainer_filter").show();

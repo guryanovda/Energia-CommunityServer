@@ -16,11 +16,12 @@
 
 
 using System;
-using System.Text.RegularExpressions;
 using System.Web;
 
 using ASC.Common.Web;
+using ASC.Core;
 using ASC.Data.Storage;
+using ASC.Web.Core;
 using ASC.Web.Core.Files;
 using ASC.Web.Studio.Core;
 using ASC.Web.Studio.PublicResources;
@@ -34,7 +35,15 @@ namespace ASC.Web.Studio.HttpHandlers
         {
             try
             {
+                if (!SecurityContext.IsAuthenticated)
+                {
+                    throw new HttpException(403, "Access denied.");
+                }
+
                 var storeDomain = context.Request["esid"];
+
+                DemandStoreAccess(storeDomain);
+
                 var itemID = context.Request["iid"] ?? "";
                 var file = context.Request.Files["upload"];
 
@@ -112,6 +121,37 @@ namespace ASC.Web.Studio.HttpHandlers
                             }
                         })
                     );
+            }
+        }
+
+        private void DemandStoreAccess(string domain)
+        {
+            if (string.IsNullOrEmpty(domain)) return;
+
+            var baseDomain = domain.Split('_')[0];
+
+            foreach (var item in WebItemManager.Instance.GetItemsAll())
+            {
+                if (item.GetSysName().EndsWith(baseDomain))
+                {
+                    if (item.IsDisabled())
+                    {
+                        throw new HttpException(403, "Access denied.");
+                    }
+
+                    if (item.IsSubItem())
+                    {
+                        var parentItemID = WebItemManager.Instance.GetParentItemID(item.ID);
+                        var parentItem = WebItemManager.Instance[parentItemID];
+
+                        if (parentItem.IsDisabled())
+                        {
+                            throw new HttpException(403, "Access denied.");
+                        }
+                    }
+
+                    break;
+                }
             }
         }
     }

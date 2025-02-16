@@ -76,6 +76,11 @@ find "$RPM_BUILD_ROOT/usr/bin/" \
 
 find "$RPM_BUILD_ROOT/var/www/%{package_sysname}/Sql" -depth -type f -exec rename -f -v 's/onlyoffice([^\/]*)$/%{package_sysname}$1/g' {} \;
 
+find \
+"$RPM_BUILD_ROOT/var/www/%{package_sysname}/" \
+"$RPM_BUILD_ROOT/etc/%{package_sysname}/communityserver/" \
+-type f -regex '.*\(json\|config\)'  ! -path '*node_modules*' -exec chmod o-rwx {} \;
+
 #list files
 OLD_IFS="$IFS"
 IFS="
@@ -90,7 +95,7 @@ for FILE in `find "$RPM_BUILD_ROOT/var/www/%{package_sysname}/"`; do
 				echo "%%attr(-, %{package_sysname}, %{package_sysname}) %%config(noreplace) \"$RELFILE\"" >>onlyoffice.list
 			;;
 
-			*/WebStudio/[Ww]eb*.config | */ApiSystem/[Ww]eb*.config | */TeamLabSvc.exe.config | */ASC.Mail.EmlDownloader.exe.config )
+			*/WebStudio/[Ww]eb*.config | */ApiSystem/[Ww]eb*.config | */TeamLabSvc.exe.config )
 				echo "%%attr(-, %{package_sysname}, %{package_sysname}) %%config \"$RELFILE\"" >>onlyoffice.list
 			;;
 
@@ -106,7 +111,7 @@ IFS="$OLD_IFS"
 rm -rf "$RPM_BUILD_ROOT"
 
 %files -f onlyoffice.list
-%attr(-, root, root) /usr/bin/*.sh
+%attr(744, root, root) /usr/bin/*.sh
 %attr(-, %{package_sysname}, %{package_sysname}) %dir /var/log/%{package_sysname}/
 %attr(-, root, root) /usr/lib/systemd/system/*.service
 %attr(-, root, root) %{nginx_conf_d}/%{package_sysname}.conf
@@ -116,6 +121,13 @@ rm -rf "$RPM_BUILD_ROOT"
 %attr(-, %{package_sysname}, %{package_sysname}) %config /etc/%{package_sysname}/communityserver/*
 
 %pre
+
+node_version=$(rpm -q --qf '%%{version}' nodejs | awk -F. '{ printf("%%d%%03d%%03d%%03d", $1,$2,$3,$4); }';)
+if [[ "$node_version" -lt "14018000000" ]]; then
+  echo -e "\033[31mFor the %{package_sysname}-communityserver package to work properly, you need to install nodejs version 14.18.0 or higher\033[0m"
+  exit 1
+fi
+
 getent group %{package_sysname} >/dev/null || groupadd -r %{package_sysname}
 getent passwd %{package_sysname} >/dev/null || useradd -r -g %{package_sysname} -d /var/www/%{package_sysname}/ -s /sbin/nologin %{package_sysname}
 
@@ -145,9 +157,13 @@ sed '/web\.controlpanel\.url/s/\(value\s*=\s*\"\)[^\"]*\"/\1\/controlpanel\/\"/'
 CORE_MACHINEKEY="$(sed -n '/"core.machinekey"/s!.*value\s*=\s*"\([^"]*\)".*!\1!p' ${DIR}/WebStudio/web.appsettings.config)";
 find "$DIR/controlpanel/www/config" -type f -name "*.json" -exec sed -i "s_\(\"core.machinekey\":\).*,_\1 \"${CORE_MACHINEKEY}\",_" {} \;
 
-if systemctl is-active monoserve | grep -q "active"; then
-	systemctl restart monoserve
-fi
+package_services=("monoserve" "%{package_sysname}ControlPanel")
+
+for SVC in "${package_services[@]}"; do
+    if systemctl is-active "$SVC" &>/dev/null; then
+        systemctl restart "$SVC"
+    fi
+done
 
 %triggerin -- python3, python36
 
@@ -159,12 +175,13 @@ fi
 
 DIR="/var/www/%{package_sysname}"
 
-python3 -m pip install --upgrade pip
-python3 -m pip install --upgrade requests
-python3 -m pip install --upgrade radicale==3.0.5
-python3 -m pip install --upgrade $DIR/Tools/radicale/plugins/app_auth_plugin/.
-python3 -m pip install --upgrade $DIR/Tools/radicale/plugins/app_store_plugin/.
-python3 -m pip install --upgrade $DIR/Tools/radicale/plugins/app_rights_plugin/.
+for pkg in radicale==3.0.5 requests setuptools importlib_metadata; do
+    rpm -q python3-"${pkg%%=*}" &>/dev/null || pip_packages+=("$pkg")
+done
+
+export PIP_ROOT_USER_ACTION=ignore
+python3 -m pip install --upgrade "${pip_packages[@]}" \
+    "$DIR/Tools/radicale/plugins/"{app_auth_plugin,app_store_plugin,app_rights_plugin}/. || true
 
 systemctl restart %{package_sysname}Radicale
 
@@ -175,7 +192,7 @@ APP_ROOT_DIR="$DIR/WebStudio";
 
 sed '/web\.talk/s/value=\"\S*\"/value=\"true\"/g' -i  ${APP_ROOT_DIR}/web.appsettings.config
 
-if systemctl is-active monoserve | grep -q "active"; then
+if systemctl is-active monoserve &>/dev/null; then
 	systemctl restart monoserve
 fi
 
@@ -240,7 +257,7 @@ fi
 
 for SVC in monoserve %{package_sysname}Thumb %{package_sysname}ThumbnailBuilder
 do
-	if systemctl is-active $SVC | grep -q "active"; then
+	if systemctl is-active $SVC &>/dev/null; then
 		systemctl restart $SVC
 	fi
 done
@@ -259,7 +276,7 @@ binDirs=("$DIR/ApiSystem/" "$DIR/WebStudio" "$DIR/controlpanel/www/config" "$SER
 if [ -f $DIR/WebStudio/web.appsettings.config.rpmsave ]; then
 	CORE_MACHINEKEY="$(sed -n '/"core.machinekey"/s!.*value\s*=\s*"\([^"]*\)".*!\1!p' ${DIR}/WebStudio/web.appsettings.config.rpmsave)";
 else
-	CORE_MACHINEKEY="$(sed -n '/"core.machinekey"/s!.*value\s*=\s*"\([^"]*\)".*!\1!p' ${DIR}/WebStudio/web.appsettings.config)";
+	CORE_MACHINEKEY="$(cat /dev/urandom | tr -dc A-Za-z0-9 | head -c 12)";
 fi
 
 sed "s^\(machine_key\)\s*=.*^\1 = ${CORE_MACHINEKEY}^g" -i ${SERVICES_DIR}/TeamLabSvc/radicale.config
@@ -294,7 +311,7 @@ APP_INDEX_DIR="${APP_DATA_DIR}/Index/v${ELASTIC_SEARCH_VERSION}"
 LOG_DIR="/var/log/%{package_sysname}"
 
 #import common ssl certificates
-mozroots --import --sync --machine --quiet
+mozroots --import --sync --machine --quiet || cert-sync /etc/pki/tls/certs/ca-bundle.crt || true
 mkdir -p /etc/mono/registry/LocalMachine
 mkdir -p /usr/share/.mono/keypairs
 mkdir -p /var/cache/nginx/%{package_sysname}
@@ -352,14 +369,11 @@ if [ $1 -ge 2 ]; then
 	fi
 fi
 
-if [ $1 -eq 1 ]; then
-
-	if /usr/share/elasticsearch/bin/elasticsearch-plugin list | grep -q "ingest-attachment"; then
-		/usr/share/elasticsearch/bin/elasticsearch-plugin remove ingest-attachment
-	fi
-
-	/usr/share/elasticsearch/bin/elasticsearch-plugin install -s -b ingest-attachment	
+if /usr/share/elasticsearch/bin/elasticsearch-plugin list | grep -q "ingest-attachment"; then
+	/usr/share/elasticsearch/bin/elasticsearch-plugin remove ingest-attachment
 fi
+
+/usr/share/elasticsearch/bin/elasticsearch-plugin install -s -b ingest-attachment
 
 if [ -f ${ELASTIC_SEARCH_CONF_PATH}.rpmnew ]; then
    cp -rf ${ELASTIC_SEARCH_CONF_PATH}.rpmnew ${ELASTIC_SEARCH_CONF_PATH};   
@@ -367,6 +381,10 @@ fi
 
 if [ -f ${ELASTIC_SEARCH_JAVA_CONF_PATH}.rpmnew ]; then
    cp -rf ${ELASTIC_SEARCH_JAVA_CONF_PATH}.rpmnew ${ELASTIC_SEARCH_JAVA_CONF_PATH};   
+fi
+
+if [ -d "${APP_DATA_DIR}/Index" ]; then
+	find ${APP_DATA_DIR}/Index -maxdepth 1 \! -name "v${ELASTIC_SEARCH_VERSION}" -type d -regex '.*/v[0-9]+\.[0-9]+\.[0-9]+.*' -exec rm -rf {} \;
 fi
 
 mkdir -p "$LOG_DIR/Index"
@@ -413,24 +431,28 @@ TOTAL_MEMORY=$(free -m | grep -oP '\d+' | head -n 1);
 MEMORY_REQUIREMENTS=12228; #RAM ~4*3Gb
 
 if [ ${TOTAL_MEMORY} -gt ${MEMORY_REQUIREMENTS} ]; then
-	if ! grep -q "[-]Xms1g" ${ELASTIC_SEARCH_JAVA_CONF_PATH}; then
-		echo "-Xms4g" >> ${ELASTIC_SEARCH_JAVA_CONF_PATH}
-	else
-		sed -i "s/-Xms1g/-Xms4g/" ${ELASTIC_SEARCH_JAVA_CONF_PATH} 
-	fi
+	ELASTICSEATCH_MEMORY="4g"
+else
+	ELASTICSEATCH_MEMORY="1g"
+fi
 
-	if ! grep -q "[-]Xmx1g" ${ELASTIC_SEARCH_JAVA_CONF_PATH}; then
-		echo "-Xmx4g" >> ${ELASTIC_SEARCH_JAVA_CONF_PATH}
-	else
-		sed -i "s/-Xmx1g/-Xmx4g/" ${ELASTIC_SEARCH_JAVA_CONF_PATH} 
-	fi
+if grep -qE "^[^#]*-Xms[0-9]g" "${ELASTIC_SEARCH_JAVA_CONF_PATH}"; then
+	sed -i "s/-Xms[0-9]g/-Xms${ELASTICSEATCH_MEMORY}/" "${ELASTIC_SEARCH_JAVA_CONF_PATH}"
+else
+	echo "-Xms${ELASTICSEATCH_MEMORY}" >> "${ELASTIC_SEARCH_JAVA_CONF_PATH}"
+fi
+
+if grep -qE "^[^#]*-Xmx[0-9]g" "${ELASTIC_SEARCH_JAVA_CONF_PATH}"; then
+	sed -i "s/-Xmx[0-9]g/-Xmx${ELASTICSEATCH_MEMORY}/" "${ELASTIC_SEARCH_JAVA_CONF_PATH}"
+else
+	echo "-Xmx${ELASTICSEATCH_MEMORY}" >> "${ELASTIC_SEARCH_JAVA_CONF_PATH}"
 fi
 
 if [ -d /etc/elasticsearch/ ]; then 
 	chmod g+ws /etc/elasticsearch/
 fi
 
-if systemctl is-active elasticsearch | grep -q "active"; then
+if systemctl is-active elasticsearch &>/dev/null; then
 	#Checking that the elastic is not currently being updated
 	if [[ $(find /usr/share/elasticsearch/lib/ -name "elasticsearch-[0-9]*.jar" | wc -l) -eq 1 ]]; then
 		systemctl restart elasticsearch.service
@@ -482,9 +504,13 @@ if [ $1 -ge 2 ]; then
 			systemctl restart $SVC
 		fi
 	done
+	if systemctl is-active %{package_sysname}AutoCleanUp &>/dev/null; then
+		systemctl disable %{package_sysname}AutoCleanUp
+		systemctl stop %{package_sysname}AutoCleanUp
+	fi
 fi
 
-if systemctl is-active monoserve | grep -q "active"; then
+if systemctl is-active monoserve &>/dev/null; then
 	curl --silent --output /dev/null http://127.0.0.1/api/2.0/warmup/restart.json || true
 fi		
 
@@ -521,11 +547,11 @@ if [ ! -z $ELASTIC_SEARCH_VERSION ]; then
 
 	$DIR/elasticsearch-plugin install -s -b ingest-attachment	
 	
-	if ! systemctl is-active elasticsearch | grep -q "inactive"; then
+	if systemctl is-active elasticsearch &>/dev/null; then
 		systemctl restart elasticsearch 
 	fi
 	
-	if ! systemctl is-active %{package_sysname}Index | grep -q "inactive"; then
+	if systemctl is-active %{package_sysname}Index &>/dev/null; then
 		systemctl restart %{package_sysname}Index 
 	fi
 fi

@@ -26,6 +26,7 @@ using System.Web.Routing;
 
 using ASC.Common.Logging;
 using ASC.Core;
+using ASC.Core.Users;
 using ASC.Security.Cryptography;
 
 namespace ASC.Data.Storage.DiscStorage
@@ -91,7 +92,7 @@ namespace ASC.Data.Storage.DiscStorage
         {
             var path = _path;
             var header = context.Request[Constants.QUERY_HEADER] ?? "";
-            var headers = header.Length > 0 ? header.Split('&').Select(HttpUtility.UrlDecode) : new string[] { };
+            var headers = header.Length > 0 ? header.Split('&').Select(HttpUtility.UrlDecode).ToList() : new List<string>();
 
             if (_checkAuth && !SecurityContext.IsAuthenticated)
             {
@@ -101,6 +102,12 @@ namespace ASC.Data.Storage.DiscStorage
                     context.Response.StatusCode = (int)HttpStatusCode.Forbidden;
                     return;
                 }
+            }
+
+            if (_module == "backup" && (!SecurityContext.IsAuthenticated || !CoreContext.UserManager.GetUsers(SecurityContext.CurrentAccount.ID).IsAdmin()))
+            {
+                context.Response.StatusCode = (int)HttpStatusCode.Forbidden;
+                return;
             }
 
             var storage = StorageFactory.GetStorage(CoreContext.TenantManager.GetCurrentTenant().TenantId.ToString(CultureInfo.InvariantCulture), _module);
@@ -125,6 +132,21 @@ namespace ASC.Data.Storage.DiscStorage
             {
                 context.Response.StatusCode = (int)HttpStatusCode.NotFound;
                 return;
+            }
+
+            var validator = storage.GetValidator(_domain);
+            if (validator != null && !validator.Validate(path))
+            {
+                context.Response.StatusCode = (int)HttpStatusCode.Forbidden;
+                return;
+            }
+
+            if (storage.IsContentDispositionAsAttachment)
+            {
+                if (!headers.Any(h => h.StartsWith("Content-Disposition")))
+                {
+                    headers.Add("Content-Disposition:attachment");
+                }
             }
 
             const int bigSize = 5 * 1024 * 1024;

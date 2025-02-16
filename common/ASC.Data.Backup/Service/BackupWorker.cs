@@ -66,8 +66,6 @@ namespace ASC.Data.Backup.Service
             configPaths = config.WebConfigs.Cast<WebConfigElement>().ToDictionary(el => el.Region, el => PathHelper.ToRootedConfigPath(el.Path));
             configPaths[currentRegion] = PathHelper.ToRootedConfigPath(config.WebConfigs.CurrentPath);
 
-            SetupInfo.ChunkUploadSize = config.ChunkSize;
-
             var invalidConfigPath = configPaths.Values.FirstOrDefault(path => !File.Exists(path));
             if (invalidConfigPath != null)
             {
@@ -104,7 +102,7 @@ namespace ASC.Data.Backup.Service
                 }
                 if (item == null)
                 {
-                    item = new BackupProgressItem(false, request.TenantId, request.UserId, request.StorageType, request.StorageBasePath) { BackupMail = request.BackupMail, StorageParams = request.StorageParams };
+                    item = new BackupProgressItem(false, request.TenantId, request.UserId, request.StorageType, request.StorageBasePath, request.Dump) { BackupMail = request.BackupMail, StorageParams = request.StorageParams };
                     tasks.Add(item);
                 }
                 return ToBackupProgress(item);
@@ -123,7 +121,7 @@ namespace ASC.Data.Backup.Service
                 }
                 if (item == null)
                 {
-                    item = new BackupProgressItem(true, schedule.TenantId, Guid.Empty, schedule.StorageType, schedule.StorageBasePath) { BackupMail = schedule.BackupMail, StorageParams = schedule.StorageParams };
+                    item = new BackupProgressItem(true, schedule.TenantId, Guid.Empty, schedule.StorageType, schedule.StorageBasePath, CoreContext.Configuration.Standalone) { BackupMail = schedule.BackupMail, StorageParams = schedule.StorageParams };
                     schedulerTasks.Add(item);
                 }
             }
@@ -133,7 +131,24 @@ namespace ASC.Data.Backup.Service
         {
             lock (tasks.SynchRoot)
             {
-                return ToBackupProgress(tasks.GetItems().OfType<BackupProgressItem>().FirstOrDefault(t => t.TenantId == tenantId));
+                var progressItem = tasks.GetItems().OfType<BackupProgressItem>().FirstOrDefault(t => t.TenantId == tenantId);
+                if (progressItem == null)
+                {
+                    return null;
+                }
+
+                if (progressItem.IsCompleted)
+                {
+                    var repo = BackupStorageFactory.GetBackupRepository();
+                    var record = repo.GetBackupRecord((Guid)progressItem.Id);
+                    if (record != null && (record.Removed || (record.ExpiresOn != DateTime.MinValue && record.ExpiresOn < DateTime.UtcNow)))
+                    {
+                        tasks.Remove(progressItem);
+                        return null;
+                    }
+                }
+
+                return ToBackupProgress(progressItem);
             }
         }
 
@@ -263,6 +278,7 @@ namespace ASC.Data.Backup.Service
             private bool IsScheduled { get; set; }
             public int TenantId { get; private set; }
             private Guid UserId { get; set; }
+            private bool Dump { get; set; }
             private BackupStorageType StorageType { get; set; }
             private string StorageBasePath { get; set; }
             public bool BackupMail { get; set; }
@@ -277,7 +293,7 @@ namespace ASC.Data.Backup.Service
             public double Percentage { get; set; }
             public bool IsCompleted { get; set; }
 
-            public BackupProgressItem(bool isScheduled, int tenantId, Guid userId, BackupStorageType storageType, string storageBasePath)
+            public BackupProgressItem(bool isScheduled, int tenantId, Guid userId, BackupStorageType storageType, string storageBasePath, bool dump)
             {
                 Id = Guid.NewGuid();
                 IsScheduled = isScheduled;
@@ -285,6 +301,7 @@ namespace ASC.Data.Backup.Service
                 UserId = userId;
                 StorageType = storageType;
                 StorageBasePath = storageBasePath;
+                Dump = dump;
             }
 
             public void RunJob()
@@ -302,7 +319,7 @@ namespace ASC.Data.Backup.Service
                 try
                 {
                     CoreContext.TenantManager.SetCurrentTenant(TenantId);
-                    var backupTask = new BackupPortalTask(Log, TenantId, configPaths[currentRegion], tempFile, limit);
+                    var backupTask = new BackupPortalTask(Log, TenantId, configPaths[currentRegion], tempFile, limit, Dump);
                     var backupStorage = BackupStorageFactory.GetBackupStorage(StorageType, TenantId, StorageParams);
                     var writer = ZipWriteOperatorFactory.GetWriteOperator(StorageBasePath, backupName, TempFolder, UserId, backupStorage as IGetterWriteOperator);
                     backupTask.WriteOperator = writer;
@@ -431,6 +448,9 @@ namespace ASC.Data.Backup.Service
                     Percentage = 10;
 
                     tenant = CoreContext.TenantManager.GetTenant(TenantId);
+
+                    Log.Debug($"RestoreProgressItem, RunJob for Tenant={tenant?.TenantId} ");
+
                     tenant.SetStatus(TenantStatus.Restoring);
                     CoreContext.TenantManager.SaveTenant(tenant);
 
@@ -484,7 +504,7 @@ namespace ASC.Data.Backup.Service
                 }
                 catch (Exception error)
                 {
-                    Log.Error(error);
+                    Log.Error(error.Message);
                     Error = error;
 
                     if (tenant != null)
